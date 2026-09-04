@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Photo Frame Generator</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+      background: #111;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px 10px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 15px;
+      color: #ffd700;
+      text-align: center;
+    }
+
+    /* Container maintaining frame aspect ratio */
+    .frame-container {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      aspect-ratio: 4 / 5; /* Matches the frame proportions */
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+      background-color: #222;
+      touch-action: none;
+      user-select: none;
+    }
+
+    /* Interactive User Photo */
+    #userPhoto {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform-origin: center center;
+      cursor: grab;
+      display: none;
+    }
+
+    #userPhoto:active {
+      cursor: grabbing;
+    }
+
+    /* Frame Overlay */
+    .frame-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none; /* Let touches pass through to photo */
+      object-fit: fill;
+      z-index: 10;
+    }
+
+    /* Placeholder text */
+    .placeholder-hint {
+      position: absolute;
+      top: 35%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #888;
+      font-size: 0.95rem;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    /* Control Controls */
+    .controls {
+      width: 100%;
+      max-width: 420px;
+      margin-top: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #222;
+      padding: 10px 15px;
+      border-radius: 8px;
+    }
+
+    .slider-row label {
+      font-size: 0.85rem;
+      min-width: 50px;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      accent-color: #ffd700;
+    }
+
+    .btn-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .btn {
+      padding: 12px 15px;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover {
+      opacity: 0.9;
+    }
+
+    .btn-upload {
+      background: #ffd700;
+      color: #000;
+      grid-column: span 2;
+    }
+
+    .btn-download {
+      background: #333;
+      color: #fff;
+    }
+
+    .btn-whatsapp {
+      background: #25d366;
+      color: #fff;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    /* Hidden Canvas for High-Resolution Export */
+    #exportCanvas {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Photo Frame Creator</h1>
+
+  <!-- Frame Area -->
+  <div class="frame-container" id="frameBox">
+    <div class="placeholder-hint" id="placeholder">Upload a photo to preview</div>
+    <img id="userPhoto" alt="User Upload" draggable="false" />
+    <img 
+      id="frameImg" 
+      class="frame-overlay" 
+      crossorigin="anonymous"
+      src="https://res.cloudinary.com/dsth5rkbf/image/upload/v1788525598/photo_frame_kvlon9.png" 
+      alt="Frame"
+    />
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <label class="btn btn-upload">
+      📁 Choose Photo
+      <input type="file" id="uploadInput" accept="image/*" />
+    </label>
+
+    <div class="slider-row">
+      <label for="zoomSlider">Zoom:</label>
+      <input type="range" id="zoomSlider" min="0.2" max="3" step="0.01" value="1" disabled />
+    </div>
+
+    <div class="btn-group">
+      <button class="btn btn-download" id="downloadBtn" disabled>💾 Save</button>
+      <button class="btn btn-whatsapp" id="shareBtn" disabled>💬 WhatsApp</button>
+    </div>
+  </div>
+
+  <canvas id="exportCanvas"></canvas>
+
+  <script>
+    const uploadInput = document.getElementById('uploadInput');
+    const userPhoto = document.getElementById('userPhoto');
+    const frameImg = document.getElementById('frameImg');
+    const frameBox = document.getElementById('frameBox');
+    const zoomSlider = document.getElementById('zoomSlider');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const shareBtn = document.getElementById('shareBtn');
+    const placeholder = document.getElementById('placeholder');
+    const exportCanvas = document.getElementById('exportCanvas');
+
+    let posX = 0;
+    let posY = 0;
+    let scale = 1;
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+
+    // 1. Upload photo
+    uploadInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        userPhoto.src = event.target.result;
+        userPhoto.onload = () => {
+          userPhoto.style.display = 'block';
+          placeholder.style.display = 'none';
+          
+          // Enable controls
+          zoomSlider.disabled = false;
+          downloadBtn.disabled = false;
+          shareBtn.disabled = false;
+
+          // Fit initially
+          const boxRect = frameBox.getBoundingClientRect();
+          const initScale = Math.max(boxRect.width / userPhoto.naturalWidth, boxRect.height / userPhoto.naturalHeight);
+          scale = initScale;
+          zoomSlider.min = (initScale * 0.5).toString();
+          zoomSlider.max = (initScale * 3).toString();
+          zoomSlider.value = initScale.toString();
+          
+          posX = 0;
+          posY = 0;
+          updateTransform();
+        };
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // 2. Drag / Touch Handling
+    function getPointerPos(e) {
+      if (e.touches && e.touches.length > 0) {
+        return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+      return { x: e.clientX, y: e.clientY };
+    }
+
+    function onPointerDown(e) {
+      if (!userPhoto.src) return;
+      isDragging = true;
+      const pos = getPointerPos(e);
+      startX = pos.x - posX;
+      startY = pos.y - posY;
+    }
+
+    function onPointerMove(e) {
+      if (!isDragging) return;
+      const pos = getPointerPos(e);
+      posX = pos.x - startX;
+      posY = pos.y - startY;
+      updateTransform();
+    }
+
+    function onPointerUp() {
+      isDragging = false;
+    }
+
+    frameBox.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+
+    frameBox.addEventListener('touchstart', onPointerDown, { passive: false });
+    window.addEventListener('touchmove', onPointerMove, { passive: false });
+    window.addEventListener('touchend', onPointerUp);
+
+    // 3. Zoom Slider
+    zoomSlider.addEventListener('input', (e) => {
+      scale = parseFloat(e.target.value);
+      updateTransform();
+    });
+
+    function updateTransform() {
+      userPhoto.style.transform = `translate(-50%, -50%) translate(${posX}px, ${posY}px) scale(${scale})`;
+    }
+
+    // 4. Render to Canvas for download / share
+    async function generateImageBlob() {
+      const targetWidth = frameImg.naturalWidth || 1080;
+      const targetHeight = frameImg.naturalHeight || 1350;
+
+      exportCanvas.width = targetWidth;
+      exportCanvas.height = targetHeight;
+      const ctx = exportCanvas.getContext('2d');
+
+      // Clear
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+
+      // Map interactive coordinates to real canvas resolution
+      const boxRect = frameBox.getBoundingClientRect();
+      const ratio = targetWidth / boxRect.width;
+
+      const centerX = targetWidth / 2 + posX * ratio;
+      const centerY = targetHeight / 2 + posY * ratio;
+
+      const drawWidth = userPhoto.naturalWidth * scale * ratio;
+      const drawHeight = userPhoto.naturalHeight * scale * ratio;
+
+      // Draw User Photo behind
+      ctx.drawImage(
+        userPhoto,
+        centerX - drawWidth / 2,
+        centerY - drawHeight / 2,
+        drawWidth,
+        drawHeight
+      );
+
+      // Draw Frame on Top
+      ctx.drawImage(frameImg, 0, 0, targetWidth, targetHeight);
+
+      return new Promise(resolve => exportCanvas.toBlob(resolve, 'image/png'));
+    }
+
+    // 5. Download Action
+    downloadBtn.addEventListener('click', async () => {
+      const blob = await generateImageBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'framed-photo.png';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // 6. Direct WhatsApp Share
+    shareBtn.addEventListener('click', async () => {
+      const blob = await generateImageBlob();
+      const file = new File([blob], 'framed-photo.png', { type: 'image/png' });
+
+      // Check if Web Share API with file sharing is supported (Mobile Browsers / WhatsApp)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'Framed Photo',
+            text: 'Here is my photo!'
+          });
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            console.error('Error sharing:', err);
+          }
+        }
+      } else {
+        // Fallback for desktops / browsers without file-share support:
+        // Downloads the image and opens WhatsApp web chat
+        alert('File sharing is supported on mobile devices. Downloading your image now and redirecting to WhatsApp...');
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'framed-photo.png';
+        a.click();
+        URL.revokeObjectURL(url);
+
+        window.open('https://api.whatsapp.com/send?text=Check%20out%20my%20framed%20photo!', '_blank');
+      }
+    });
+  </script>
+</body>
+</html>
